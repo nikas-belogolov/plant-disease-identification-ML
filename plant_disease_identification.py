@@ -8,6 +8,10 @@ Original file is located at
 
 # Plant disease identification
 
+##### Author: Nikas Belogolov, י"א 6
+
+---
+
 ## Introduction
 
 This project aims to develop a neural network-based image classifier to identify diseases in pepper and potato plants. Leveraging deep learning techniques, the model will be trained to distinguish between healthy plants and those affected by various diseases. This application is crucial for early disease detection and effective crop management, potentially leading to higher yields and reduced losses.
@@ -29,7 +33,7 @@ The dataset was truncated to 5 classes for simplicity (2 classes for pepper plan
 ## Setup
 """
 
-!pip install tensorflow numpy seaborn scikit-learn pandas pathlib matplotlib shap PIL
+!pip install tensorflow numpy seaborn scikit-learn pandas pathlib matplotlib shap Pillow
 
 import os
 import tensorflow as tf
@@ -46,9 +50,11 @@ import pandas as pd
 import shap
 from PIL import Image
 import random
-
+import shutil
 from sklearn.metrics import confusion_matrix
 from keras.utils import to_categorical
+
+"""Local and cloud environments config, and constant variables."""
 
 if os.getenv("COLAB_RELEASE_TAG"):
   from google.colab import drive
@@ -64,10 +70,14 @@ else:
 CLASSES = ['Pepper__bell___Bacterial_spot', 'Pepper__bell___healthy', 'Potato___Early_blight', 'Potato___Late_blight', 'Potato___healthy']
 IMG_SIZE = (128, 128)
 EPOCHS = 100
-LEARNING_RATE = 0.0001
+LEARNING_RATE = 0.001
 EARLY_STOPPING_PATIENCE = 5
 
-"""## Train Test Validation Split"""
+"""## Train Test Validation Split
+Here we split the dataset from kaggle into three folders: training folder, validation folder and testing folder.
+
+The ratio for splitting is: 75% for training, 15% for testing and 10% for validation.
+"""
 
 #הגדרת תיקיות המקור והיעד של הפיצול.
 source_dir = "/content/drive/MyDrive/PlantVillage_Dataset"
@@ -75,15 +85,14 @@ destination_dir = "/content/drive/MyDrive/PlantVillage_Dataset/split"
 
 #הגדרת התיקיות החדשות בתיקיית היעד והמחלקות השונות
 new_folders = ['train', 'test', 'val']
-classes = ['Pepper__bell___Bacterial_spot', 'Pepper__bell___healthy', 'Potato___Early_blight', 'Potato___Late_blight', 'Potato___healthy']
 
 for folder in new_folders:
-    for class_name in classes:
+    for class_name in CLASSES:
         new_folder_path = os.path.join(destination_dir, folder, class_name)
         Path(new_folder_path).mkdir(parents=True, exist_ok=True)
 
 def split_and_copy_files(source_dir, destination_dir, split_ratios):
-    for class_name in classes:
+    for class_name in CLASSES:
         class_files = os.listdir(os.path.join(source_dir, class_name))
         random.shuffle(class_files)
 
@@ -107,13 +116,13 @@ split_and_copy_files(source_dir, destination_dir, split_ratios)
 
 print("Files copied successfully!")
 
-"""## Explore Dataset"""
-
-classes = ['Pepper__bell___Bacterial_spot', 'Pepper__bell___healthy', 'Potato___Early_blight', 'Potato___Late_blight', 'Potato___healthy']
+"""## Explore Dataset
+The first graph is the number of images in training, validation and testing datasets.
+"""
 
 # Sample data (replace this with your actual data)
 data = {
-    'Label': classes * 3,
+    'Label': CLASSES * 3,
     'Split': [],
     'Size': []
 }
@@ -135,9 +144,11 @@ plt.xlabel('Labels')
 sns.move_legend(ax, "upper right")
 plt.show()
 
+"""The second is random images, drawn from each class."""
+
 random_images = []
 
-for class_name in classes:
+for class_name in CLASSES:
   choice = random.choice(os.listdir(dir + "/" + class_name))
   random_images.append(f"{dir}/{class_name}/{choice}")
 
@@ -146,14 +157,18 @@ for i, path in enumerate(random_images):
     # Load and display the image
     img = plt.imread(path)
     axes[i].imshow(img)
-    axes[i].set_title(classes[i])
+    axes[i].set_title(CLASSES[i])
     axes[i].axis('off')
 
 plt.show()
 
-"""## Data Preprocessing"""
+"""## Normalization
+The dataset is normalized to have pixel values ranging from 0 to 1 instead of 0 to 255, which speeds up the fitting process later.
+"""
 
 directory = "/content/drive/MyDrive/PlantVillage_Dataset/split"
+
+# Initialization of ImageDataGenerator with rescale
 img_data_generator = ImageDataGenerator(rescale=1./225)
 
 # Define batch size
@@ -178,7 +193,9 @@ test_generator = img_data_generator.flow_from_directory(
     batch_size=batch_size,
     class_mode='categorical')
 
-"""# Verify that all images are valid"""
+"""## Verify that all images are valid
+Some images were found to be corrupted, so remove all of the corrupted images.
+"""
 
 # Iterate through each folder
 for folder in os.listdir(split_dir + "/train"):
@@ -201,16 +218,16 @@ for folder in os.listdir(split_dir + "/train"):
 
 def create_model(input_shape):
   model = tf.keras.models.Sequential([
-      tf.keras.Input(shape=input_shape), #
+      tf.keras.Input(shape=input_shape),
       tf.keras.layers.Flatten(),
+      tf.keras.layers.Dense(256, activation='ReLU'),
       tf.keras.layers.Dense(128, activation='ReLU'),
       tf.keras.layers.Dense(64, activation='ReLU'),
-      tf.keras.layers.Dense(32, activation='ReLU'),
       tf.keras.layers.Dense(32, activation='ReLU'),
       tf.keras.layers.Dense(5, activation='softmax')
   ])
 
-  optimizer = tf.keras.optimizers.legacy.Adam(learning_rate=LEARNING_RATE)
+  optimizer = tf.keras.optimizers.Adam(learning_rate=LEARNING_RATE)
   model.compile(optimizer=optimizer,
                 loss=tf.keras.losses.CategoricalCrossentropy(),
                 metrics=['accuracy'])
@@ -223,6 +240,32 @@ def save_model(model_name):
 def load_model(model_name):
   return tf.keras.models.load_model(f'{models_dir}/{model_name}')
 
+"""## Model Architecture and Parameters
+### Model Architecture
+- **Input Layer**: The model takes an input shape of (128, 128, 3), which corresponds to images of size 128x128 pixels with three color channels (RGB). This input layer does not modify the data but passes it to the next layer.
+- **Flatten Layer**: The Flatten layer converts the multi-dimensional input data into a one-dimensional array, making it suitable for the dense layers that follow.
+- **Dense Layers**: Following the flatten layer, there are 4 dense layers with ReLU activation. Each dense layer has less neurons than the layer before it.
+- **Output Layer**: The output layer uses the softmax activation function, and produces a probability distribution over the 5 classes for classification.
+
+### Parameters
+
+- Learning Rate: The model uses the Adam optimizer with a learning rate specified by the LEARNING_RATE variable.
+
+- Number of Epochs: The model is trained for a number of epochs specified by the EPOCHS variable. Each epoch represents one complete pass through the training dataset.
+
+- Optimizer: The model uses the Adam optimizer, which adapts the learning rate during training for improved convergence.
+
+- Loss Function: The model is compiled with the Categorical Crossentropy loss function, which is suitable for multi-class classification problems.
+
+- Metrics: The model tracks accuracy as a metric to evaluate its performance during training and validation.
+
+### Callbacks
+
+- Model Checkpoint: The ModelCheckpoint callback saves the best version of the model based on validation loss, preventing overfitting by preserving the best weights.
+
+- Early Stopping: The EarlyStopping callback monitors the validation loss and stops training if it does not improve for a specified number of epochs (patience), as defined by the EARLY_STOPPING_PATIENCE variable.
+"""
+
 input_shape = IMG_SIZE + (3,)
 
 model = create_model(input_shape)
@@ -231,20 +274,23 @@ plot_model(model, show_shapes=True, show_layer_names=True)
 
 """## Model Training"""
 
-checkpoint = tf.keras.callbacks.ModelCheckpoint("best_model", save_best_only=True)
+CHECKPOINT_FILEPATH="/content/drive/MyDrive/PlantVillage_Dataset/checkpoints"
+checkpoint = tf.keras.callbacks.ModelCheckpoint(filepath=CHECKPOINT_FILEPATH, save_best_only=True)
 stop_early = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=EARLY_STOPPING_PATIENCE)
 
 history = model.fit(train_generator, epochs=EPOCHS, validation_data=val_generator, callbacks=[stop_early, checkpoint])
 
-plt.plot(history.history['accuracy'], label='Training Accuracy')
+"""## Training history graphs"""
+
+plt.plot(history.history['accuracy'], label='Training Accuracy', color="green")
 plt.plot(history.history['val_accuracy'], label='Validation Accuracy')
 plt.xlabel('Epoch')
-plt.ylabel('Loss')
+plt.ylabel('Accuracy')
 plt.legend()
 plt.show()
 
 # Plot the accuracy over epochs
-plt.plot(history.history['loss'], label='Loss Function')
+plt.plot(history.history['loss'], label='Loss Function', color="green")
 plt.plot(history.history['val_loss'], label='Validation Loss Function')
 plt.xlabel('Epoch')
 plt.ylabel('Loss')
@@ -264,46 +310,67 @@ for i, model in enumerate(os.listdir(models_dir)):
 
 model = load_model(f'{models[int(input())]}')
 
+model = tf.keras.models.load_model("/content/drive/MyDrive/PlantVillage_Dataset/checkpoints")
+
 """## Model Evaluation
 
 ### Evaluate Model
-
-### Confusion Matrix
 """
 
-print("test loss, test acc:", model.evaluate(test_generator))
-
-# Get predictions from the model using the test generator
-predictions = model.predict_generator(test_generator)
+test_generator = img_data_generator.flow_from_directory(
+    split_dir + '/test',
+    target_size=IMG_SIZE,
+    batch_size=batch_size,
+    shuffle=False,
+    class_mode='categorical')
 
 # Get true labels from the test generator
 true_labels = test_generator.classes
 
+# Get predictions from the model using the test generator
+predictions = model.predict(test_generator)
+
 # Convert predictions to class labels
 predicted_labels = np.argmax(predictions, axis=1)
 
-print("Classification Report:", classification_report(true_labels, predicted_labels))
+print("test loss, test acc:", model.evaluate(test_generator))
+
+print("Classification Report:\n", classification_report(true_labels, predicted_labels, target_names=CLASSES))
+
+"""### Confusion Matrix"""
 
 print("Confusion Matrix:")
 
 # Calculate confusion matrix
 cm = confusion_matrix(true_labels, predicted_labels)
-
+print(cm)
 # Plot confusion matrix
 plt.figure(figsize=(8, 6))
-sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=classes, yticklabels=classes)
+sns.heatmap(cm, annot=True, fmt='d', cmap='Greens', xticklabels=CLASSES, yticklabels=CLASSES)
 plt.title('Confusion Matrix')
 plt.xlabel('Predicted Label')
 plt.ylabel('True Label')
 plt.show()
 
-"""## Explaining model outputs with SHAP values"""
+"""## Explaining model outputs with SHAP values
+
+### What are SHAP values?
+SHAP (SHapley Additive exPlanations) values are a method used in machine learning to understand how individual features contribute to model predictions. They quantify the impact of each feature on a model's output for a specific data point, helping to interpret the model's decisions better.
+
+### How I integrated them into my project?
+
+To integrate SHAP into my project, I had to do a little of research on what kind of input the SHAP explainer function takes in.
+
+I've found that it takes a numpy array of the image pixels, so I've converted the images into a numpy array.
+"""
 
 x_train = []
 y_train = []
 
 x_test = []
 y_test = []
+
+"""### Convert images to numpy array and save to .npz file"""
 
 for _, label in enumerate(os.listdir(split_dir + "/train")):
   for _, file in enumerate(os.listdir(split_dir + "/train/" + label)):
@@ -312,7 +379,7 @@ for _, label in enumerate(os.listdir(split_dir + "/train")):
     image = image.convert('RGB')
     image_array = np.array(image)
     x_train.append(image_array)
-    y_train.append(classes.index(label))
+    y_train.append(CLASSES.index(label))
 
 for _, label in enumerate(os.listdir(split_dir + "/test")):
   for _, file in enumerate(os.listdir(split_dir + "/test/" + label)):
@@ -321,10 +388,12 @@ for _, label in enumerate(os.listdir(split_dir + "/test")):
     image = image.convert('RGB')
     image_array = np.array(image)
     x_test.append(image_array)
-    y_test.append(classes.index(label))
+    y_test.append(CLASSES.index(label))
 
 # save as DataX or any other name. But the same element name is to be used while loading it back.
 np.savez("/content/drive/MyDrive/PlantVillage_Dataset/mnistlikedataset.npz",x_train=x_train, y_train=y_train, x_test=x_test, y_test=y_test)
+
+"""### Load images data from .npz file"""
 
 path = "/content/drive/MyDrive/PlantVillage_Dataset/mnistlikedataset.npz"
 x_train, y_train, x_test, y_test
@@ -359,7 +428,7 @@ y_test = to_categorical(y_test, num_classes)
 """### Initialize SHAP Explainer"""
 
 # select a set of background examples to take an expectation over
-background = x_train[np.random.choice(x_train.shape[0], 100, replace=False)]
+background = x_train[np.random.choice(x_train.shape[0], 700, replace=False)]
 
 # explain predictions of the model on three images
 explainer  = shap.DeepExplainer(model, background)
@@ -368,21 +437,97 @@ explainer  = shap.DeepExplainer(model, background)
 
 shap_values = explainer.shap_values(x_test[0:5])
 
-shap_values_combined = np.sum(shap_values[1], axis=-1)  # Combine SHAP values across color channels
-abs_max = np.percentile(np.abs(shap_values_combined), 100)
-# Normalize the SHAP values to the range [0, 1]
-shap_values_normalized = (shap_values_combined - shap_values_combined.min()) / (shap_values_combined.max() - shap_values_combined.min())
-
 """### Plot SHAP Values"""
 
-# Visualize SHAP values for each color channel separately
-fig, axes = plt.subplots(1, 4, figsize=(15, 5))
-axes[0].imshow(x_test[1])
-axes[0].set_title(f"Original Image")
-axes[0].axis('off')
-for i, channel in enumerate(["Red", "Green", "Blue"]):
-    axes[i + 1].imshow(shap_values_normalized[:,:,i], cmap='seismic', vmin=0, vmax=1)
-    axes[i + 1].set_title(f"SHAP values for channel {channel}")
-    axes[i + 1].axis('off')
+random_index = random.randint(0, 4)
 
+shap_value = shap_values[random_index]
+
+fig, axs = plt.subplots(3, 6, figsize=(15, 10))
+
+axs[0, 0].set_title(f"Original Image")
+
+for i, channel in enumerate(["Red", "Green", "Blue"]):
+    axs[i, 0].imshow(x_test[random_index,:,])
+    axs[i, 0].set(ylabel=f"{channel} channel")
+
+for ax in axs.flat:
+    ax.set_yticks([])
+    ax.set_xticks([])
+    # Hide x labels and tick labels for top plots and y ticks for right plots.
+    ax.label_outer()
+
+for class_idx, cls in enumerate(CLASSES):
+  shap_values_normalized = (shap_value[:,:,:,class_idx] - shap_value[:,:,:,class_idx].min()) / (shap_value[:,:,:,class_idx].max() - shap_value[:,:,:,class_idx].min())
+
+  for channel_idx, channel in enumerate(["Red", "Green", "Blue"]):
+      axs[channel_idx, class_idx + 1].imshow(shap_values_normalized[:,:,channel_idx], cmap='seismic', vmin=0, vmax=1)
+      if channel_idx == 0:
+          axs[channel_idx, class_idx + 1].set_title(cls)
+plt.tight_layout()
 plt.show()
+
+"""# Discussion and Conclusions
+
+## Discussion
+
+### Confusion Matrix
+
+The model demonstrates robust performance with an overall accuracy of 88%. It excels particularly in identifying **Potato___Early_blight** and has high precision in classifying healthy pepper and potato plants.
+
+The primary area for improvement is reducing misclassifications between **Pepper__bell___Bacterial_spot**, **Pepper__bell___healthy**, and **Potato___Late_blight**. Despite these misclassifications, the model is highly effective for the task of multi-class classification of plant diseases.
+
+### Classification Report
+
+**Precision** - measures how many of the positive predictions made by the model are actually correct.
+
+**Recall** - measures how well the model identifies all relevant instances.
+
+**F1** - A measure that balances precision and recall. It's the harmonic mean of precision and recall.
+
+The model was precise in predicting healthy pepper and potato plants, but was struggling to identify all instances of them.
+
+It was predicting more false positives of unhealthy plants, but more or less it was great at finding most instances of plants with diseases.
+
+```
+                                precision    recall  f1-score   support
+
+Pepper__bell___Bacterial_spot       0.81      0.83      0.82       275
+       Pepper__bell___healthy       0.99      0.79      0.88       363
+        Potato___Early_blight       0.92      1.00      0.96       282
+         Potato___Late_blight       0.77      0.94      0.85       276
+             Potato___healthy       0.97      0.85      0.90       164
+
+                     accuracy                           0.88      1360
+                    macro avg       0.89      0.88      0.88      1360
+                 weighted avg       0.89      0.88      0.88      1360
+```
+
+### SHAP
+
+In this project I've used for the first time SHAP (SHapley Additive exPlanations), which are used to explain the output of any machine learning model.
+
+Although SHAP can provide good insight into a model, it didn't help me that much it this project to understand how the model works and why it returns the output it does. But I will use SHAP in the future projects to understand the model outputs.
+
+### Limitations
+
+It is hard to identify similar looking plants, and even harder to differentiate between diseases, as one plant can have multiple similar looking diseases.
+
+But even with those limitations, the model has a close to 90% accuracy with similar looking plants and diseases.
+
+### Future Work
+
+Future work for this project could be:
+
+*   Expanding the dataset (More plant species, diseases).
+*   Improving the model architecture.
+*   Deploying the model in real-world application.
+
+## Conclusions
+
+This project successfully demonstrated the application of deep learning techniques for identifying diseases in pepper and potato plants using image classification.
+
+The neural network model achieved a high level of accuracy, effectively distinguishing between healthy and diseased plants.
+
+These contributions highlight the potential of AI-driven solutions in early disease detection and effective crop management, paving the way for improved agricultural productivity and reduced crop losses.
+"""
